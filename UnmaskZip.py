@@ -169,16 +169,26 @@ def _extract_external(filepath, out_dir, passwords, tool_path, log_cb):
 
 def _flatten_single(out_dir, base_out, log_cb):
     if not out_dir.exists():
+        log_cb(f"    [D] out_dir 不存在, 跳过平铺")
         return
     items = list(out_dir.iterdir())
-    if len(items) != 1: return
+    log_cb(f"    [D] out_dir 内有 {len(items)} 个条目: {[i.name for i in items]}")
+    if len(items) != 1:
+        log_cb(f"    [D] 条目数!=1, 保留子目录")
+        return
     item = items[0]
     dest = base_out / item.name
+    log_cb(f"    [D] 准备平铺: {item.name} -> {dest}")
 
     if dest.exists():
+        # 防止 dest 就是 out_dir 本身（同名导致自删）
+        if dest == out_dir or dest.resolve() == out_dir.resolve():
+            log_cb(f"    [D] dest==out_dir, 跳过平铺（已在目标位置）")
+            return
         if item.is_dir():
             try:
                 shutil.rmtree(dest)
+                log_cb(f"    [D] 已删除旧目录: {dest.name}")
             except Exception as e:
                 log_cb(f"    [!] 清理旧目录失败: {e}")
                 return
@@ -190,11 +200,12 @@ def _flatten_single(out_dir, base_out, log_cb):
                 n += 1
 
     if not item.exists():
+        log_cb(f"    [D] item 已不存在, 放弃平铺")
         return
 
     try:
         shutil.move(str(item), str(dest))
-        out_dir.rmdir()
+        shutil.rmtree(out_dir, ignore_errors=True)
         log_cb(f"    → 平铺: {dest.name}")
     except Exception as e:
         log_cb(f"    [!] 整理失败: {e}")
