@@ -1,0 +1,26 @@
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.spec
+
+# 密钥 & 密码（不要提交真实密码！）
+*.key
+passwords.dat
+passwords.txt
+
+# 输出目录
+_extracted/
+
+# 系统
+.DS_Store
+Thumbs.db
