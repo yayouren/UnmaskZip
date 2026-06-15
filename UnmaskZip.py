@@ -260,6 +260,12 @@ def process_one_file(fp, passwords, method, tool_path, base_out, log_cb, overwri
     # 平铺
     if out_dir.exists():
         _flatten_single(out_dir, base_out, log_cb)
+        # 兜底清理空目录
+        if out_dir.exists():
+            try:
+                if not any(out_dir.iterdir()):
+                    shutil.rmtree(out_dir, ignore_errors=True)
+            except: pass
     return True
 
 def _recurse_dir(folder, passwords, method, tool_path, base_out, log_cb, cleanup=False):
