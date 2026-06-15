@@ -218,7 +218,7 @@ def _flatten_single(out_dir, base_out, log_cb):
     except Exception as e:
         log_cb(f"    [!] 整理失败: {e}")
 
-def process_one_file(fp, passwords, method, tool_path, base_out, log_cb, overwrite=False):
+def process_one_file(fp, passwords, method, tool_path, base_out, log_cb, overwrite=False, cleanup=False):
     """处理单个文件，返回是否成功"""
     fp = Path(fp)
     log_cb(f"[*] {fp.name}")
@@ -239,10 +239,13 @@ def process_one_file(fp, passwords, method, tool_path, base_out, log_cb, overwri
 
     if method in ("auto", "pyzipper") and HAS_PYZIPPER:
         ok = _extract_pyzipper(fp, out_dir, passwords, log_cb)
+        log_cb(f"  [D] pyzipper: {'OK' if ok else 'FAIL'}")
     if not ok and method in ("auto", "7z", "rar") and tool_path:
         ok = _extract_external(fp, out_dir, passwords, tool_path, log_cb)
+        log_cb(f"  [D] {Path(tool_path).stem}: {'OK' if ok else 'FAIL'}")
     if not ok and method == "auto":
         ok = _extract_pyzipper_pk(fp, out_dir, passwords, log_cb)
+        log_cb(f"  [D] pyzipper+PK: {'OK' if ok else 'FAIL'}")
 
     if not ok:
         log_cb(f"  [-] 非压缩包或密码不匹配")
@@ -252,14 +255,14 @@ def process_one_file(fp, passwords, method, tool_path, base_out, log_cb, overwri
         return False
 
     # 递归处理内层
-    _recurse_dir(out_dir, passwords, method, tool_path, base_out, log_cb)
+    _recurse_dir(out_dir, passwords, method, tool_path, base_out, log_cb, cleanup)
 
     # 平铺
     if out_dir.exists():
         _flatten_single(out_dir, base_out, log_cb)
     return True
 
-def _recurse_dir(folder, passwords, method, tool_path, base_out, log_cb):
+def _recurse_dir(folder, passwords, method, tool_path, base_out, log_cb, cleanup=False):
     targets = []
     try:
         for f in folder.iterdir():
@@ -284,6 +287,10 @@ def _recurse_dir(folder, passwords, method, tool_path, base_out, log_cb):
             continue
         if out_dir.exists():
             _flatten_single(out_dir, base_out, log_cb)
+        # 清理中间文件
+        if cleanup:
+            try: f.unlink()
+            except: pass
 
 # ===================== GUI =====================
 class App:
@@ -320,6 +327,9 @@ class App:
 
         self.overwrite_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(top, text="覆盖解压", variable=self.overwrite_var).pack(side=tk.LEFT, padx=2)
+
+        self.cleanup_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(top, text="清理中间文件", variable=self.cleanup_var).pack(side=tk.LEFT, padx=2)
 
         self.log_visible = tk.BooleanVar(value=True)
         ttk.Checkbutton(top, text="显示日志", variable=self.log_visible,
@@ -443,6 +453,7 @@ class App:
 
         same_dir = self.same_dir_var.get()
         overwrite = self.overwrite_var.get()
+        cleanup = self.cleanup_var.get()
         total = len(self.files)
 
         def log_cb(msg):
@@ -460,7 +471,7 @@ class App:
                     self.root.after(0, lambda p=fp: self._set_status(p, "解压中"))
                     base = Path(fp).parent if same_dir else Path(self.config.get("output_dir", str(BASE_OUTPUT)))
                     base.mkdir(parents=True, exist_ok=True)
-                    ok = process_one_file(fp, self.passwords, method, tool, base, log_cb, overwrite)
+                    ok = process_one_file(fp, self.passwords, method, tool, base, log_cb, overwrite, cleanup)
                     self.root.after(0, lambda p=fp, o=ok: self._set_status(p, "完成 ✅" if o else "失败 ❌"))
                     pct = int((i + 1) / total * 100)
                     self.root.after(0, lambda v=pct: self.progress.configure(value=v))
