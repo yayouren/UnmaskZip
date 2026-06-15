@@ -168,6 +168,8 @@ def _extract_external(filepath, out_dir, passwords, tool_path, log_cb):
     return False
 
 def _flatten_single(out_dir, base_out, log_cb):
+    if not out_dir.exists():
+        return
     items = list(out_dir.iterdir())
     if len(items) != 1: return
     item = items[0]
@@ -186,6 +188,10 @@ def _flatten_single(out_dir, base_out, log_cb):
             while dest.exists():
                 dest = base_out / f"{stem}_{n}{suffix}"
                 n += 1
+
+    if not item.exists():
+        return
+
     try:
         shutil.move(str(item), str(dest))
         out_dir.rmdir()
