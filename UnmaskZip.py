@@ -104,7 +104,7 @@ def scan_external_tools():
                     if Path(p).exists(): found.append((p, "WinRAR"))
             except: pass
     except: pass
-    for name in ["7z.exe", "7zr.exe", "WinRAR.exe"]:
+    for name in ["7z.exe", "7zr.exe", "UnRAR.exe", "WinRAR.exe"]:
         p = shutil.which(name)
         if p and p not in [f[0] for f in found]: found.append((p, Path(p).stem))
     for p in _7Z_PATHS + _RAR_PATHS:
@@ -149,7 +149,12 @@ def _extract_pyzipper_pk(filepath, out_dir, passwords, log_cb):
 def _extract_external(filepath, out_dir, passwords, tool_path, log_cb):
     if not tool_path or not Path(tool_path).exists(): return False
     cf = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-    extra = ["-mmt=on"] if "7z" in Path(tool_path).name.lower() else []
+    is_winrar = "winrar" in Path(tool_path).name.lower() or "rar" in Path(tool_path).name.lower()
+    extra = []
+    if "7z" in Path(tool_path).name.lower():
+        extra = ["-mmt=on"]
+    if is_winrar:
+        extra = ["-ibck"]  # 抑制 WinRAR 弹窗
     try:
         cmd = [tool_path, "x", "-y"] + extra + [str(filepath), f"-o{out_dir}"]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, creationflags=cf)
