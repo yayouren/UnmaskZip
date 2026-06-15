@@ -180,11 +180,19 @@ def _flatten_single(out_dir, base_out, log_cb):
     dest = base_out / item.name
     log_cb(f"    [D] 准备平铺: {item.name} -> {dest}")
 
-    if dest.exists():
-        # 防止 dest 就是 out_dir 本身（同名导致自删）
+    if dest.exists() or dest == out_dir:
+        # dest == out_dir: 同名嵌套，把 item 内容上提到 out_dir
         if dest == out_dir or dest.resolve() == out_dir.resolve():
-            log_cb(f"    [D] dest==out_dir, 跳过平铺（已在目标位置）")
+            log_cb(f"    [D] 同名嵌套, 上提内容")
+            try:
+                for child in item.iterdir():
+                    shutil.move(str(child), str(out_dir / child.name))
+                item.rmdir()
+                log_cb(f"    → 平铺: {item.name} 内容已上提")
+            except Exception as e:
+                log_cb(f"    [!] 上提失败: {e}")
             return
+
         if item.is_dir():
             try:
                 shutil.rmtree(dest)
