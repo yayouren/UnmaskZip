@@ -61,7 +61,7 @@ def decrypt_data(enc: str) -> str:
     return base64.b64decode(enc.encode()).decode()
 
 # ===================== 配置 =====================
-DEFAULT_CONFIG = {"method": "auto", "external_tool": "", "output_dir": str(BASE_OUTPUT)}
+DEFAULT_CONFIG = {"method_order": ["pyzipper", "7z", "rar"], "7z_path": "", "rar_path": "", "output_dir": str(BASE_OUTPUT)}
 
 def load_config():
     if CONFIG_FILE.exists():
@@ -148,10 +148,10 @@ def _extract_pyzipper_pk(filepath, out_dir, passwords, log_cb):
 
 def _extract_external(filepath, out_dir, passwords, tool_path, log_cb):
     if not tool_path or not Path(tool_path).exists(): return False
-    is_rar = "rar" in Path(tool_path).name.lower()
     cf = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+    extra = ["-mmt=on"] if "7z" in Path(tool_path).name.lower() else []
     try:
-        cmd = [tool_path, "x", "-y", str(filepath), f"-o{out_dir}"]
+        cmd = [tool_path, "x", "-y"] + extra + [str(filepath), f"-o{out_dir}"]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, creationflags=cf)
         if r.returncode == 0:
             log_cb(f"  [√] 无密码 ({Path(tool_path).stem})")
@@ -159,7 +159,7 @@ def _extract_external(filepath, out_dir, passwords, tool_path, log_cb):
     except: pass
     for pwd in passwords:
         try:
-            cmd = [tool_path, "x", "-y", f"-p{pwd}", str(filepath), f"-o{out_dir}"]
+            cmd = [tool_path, "x", "-y"] + extra + [f"-p{pwd}", str(filepath), f"-o{out_dir}"]
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, creationflags=cf)
             if r.returncode == 0:
                 log_cb(f"  [√] 密码解压 ({Path(tool_path).stem}): {pwd}")
@@ -218,8 +218,8 @@ def _flatten_single(out_dir, base_out, log_cb):
     except Exception as e:
         log_cb(f"    [!] 整理失败: {e}")
 
-def process_one_file(fp, passwords, method, tool_path, base_out, log_cb, overwrite=False, cleanup=False):
-    """处理单个文件，返回是否成功"""
+def process_one_file(fp, passwords, config, base_out, log_cb, overwrite=False, cleanup=False):
+    """处理单个文件，config = {method_order, 7z_path, rar_path}"""
     fp = Path(fp)
     log_cb(f"[*] {fp.name}")
 
@@ -229,21 +229,24 @@ def process_one_file(fp, passwords, method, tool_path, base_out, log_cb, overwri
         return True
 
     if overwrite and out_dir.exists():
-        try:
-            shutil.rmtree(out_dir)
-        except Exception as e:
-            log_cb(f"  [!] 清理旧目录失败: {e}")
+        try: shutil.rmtree(out_dir)
+        except Exception as e: log_cb(f"  [!] 清理旧目录失败: {e}")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     ok = False
+    order = config.get("method_order", ["pyzipper", "7z", "rar"])
+    paths = {"7z": config.get("7z_path", ""), "rar": config.get("rar_path", "")}
 
-    if method in ("auto", "pyzipper") and HAS_PYZIPPER:
-        ok = _extract_pyzipper(fp, out_dir, passwords, log_cb)
-        log_cb(f"  [D] pyzipper: {'OK' if ok else 'FAIL'}")
-    if not ok and method in ("auto", "7z", "rar") and tool_path:
-        ok = _extract_external(fp, out_dir, passwords, tool_path, log_cb)
-        log_cb(f"  [D] {Path(tool_path).stem}: {'OK' if ok else 'FAIL'}")
-    if not ok and method == "auto":
+    for m in order:
+        if m == "pyzipper" and HAS_PYZIPPER:
+            ok = _extract_pyzipper(fp, out_dir, passwords, log_cb)
+        elif m in ("7z", "rar"):
+            ok = _extract_external(fp, out_dir, passwords, paths.get(m, ""), log_cb)
+        log_cb(f"  [D] {m}: {'OK' if ok else 'FAIL'}")
+        if ok: break
+
+    if not ok:
+        # 最后尝试 PK 签名搜索
         ok = _extract_pyzipper_pk(fp, out_dir, passwords, log_cb)
         log_cb(f"  [D] pyzipper+PK: {'OK' if ok else 'FAIL'}")
 
@@ -255,7 +258,7 @@ def process_one_file(fp, passwords, method, tool_path, base_out, log_cb, overwri
         return False
 
     # 递归处理内层
-    _recurse_dir(out_dir, passwords, method, tool_path, base_out, log_cb, cleanup)
+    _recurse_dir(out_dir, passwords, config, base_out, log_cb, cleanup)
 
     # 平铺
     if out_dir.exists():
@@ -268,23 +271,27 @@ def process_one_file(fp, passwords, method, tool_path, base_out, log_cb, overwri
             except: pass
     return True
 
-def _recurse_dir(folder, passwords, method, tool_path, base_out, log_cb, cleanup=False):
+def _recurse_dir(folder, passwords, config, base_out, log_cb, cleanup=False):
     targets = []
     try:
         for f in folder.iterdir():
             if f.is_file() and f.suffix.lower() in TARGET_EXTS:
                 targets.append(f)
     except: return
+    order = config.get("method_order", ["pyzipper", "7z", "rar"])
+    paths = {"7z": config.get("7z_path", ""), "rar": config.get("rar_path", "")}
     for f in sorted(targets):
         out_dir = base_out / f.stem
         if out_dir.exists() and any(out_dir.iterdir()): continue
         out_dir.mkdir(parents=True, exist_ok=True)
         ok = False
-        if method in ("auto", "pyzipper") and HAS_PYZIPPER:
-            ok = _extract_pyzipper(f, out_dir, passwords, log_cb)
-        if not ok and method in ("auto", "7z", "rar") and tool_path:
-            ok = _extract_external(f, out_dir, passwords, tool_path, log_cb)
-        if not ok and method == "auto":
+        for m in order:
+            if m == "pyzipper" and HAS_PYZIPPER:
+                ok = _extract_pyzipper(f, out_dir, passwords, log_cb)
+            elif m in ("7z", "rar"):
+                ok = _extract_external(f, out_dir, passwords, paths.get(m, ""), log_cb)
+            if ok: break
+        if not ok:
             ok = _extract_pyzipper_pk(f, out_dir, passwords, log_cb)
         if not ok:
             try:
@@ -380,7 +387,7 @@ class App:
 
         self.log_msg("解压小助手 GUI 已启动")
         self.log_msg(f"密码本: {len(self.passwords)} 个密码")
-        self.log_msg(f"解压方式: {self.config.get('method', 'auto')}")
+        self.log_msg(f"解压顺序: {' → '.join(self.config.get('method_order', ['pyzipper','7z','rar']))}")
 
     def _toggle_log(self):
         if self.log_visible.get():
@@ -471,13 +478,11 @@ class App:
         def worker():
             try:
                 files = list(self.files)
-                method = self.config.get("method", "auto")
-                tool = self.config.get("external_tool", "")
                 for i, fp in enumerate(files):
                     self.root.after(0, lambda p=fp: self._set_status(p, "解压中"))
                     base = Path(fp).parent if same_dir else Path(self.config.get("output_dir", str(BASE_OUTPUT)))
                     base.mkdir(parents=True, exist_ok=True)
-                    ok = process_one_file(fp, self.passwords, method, tool, base, log_cb, overwrite, cleanup)
+                    ok = process_one_file(fp, self.passwords, self.config, base, log_cb, overwrite, cleanup)
                     self.root.after(0, lambda p=fp, o=ok: self._set_status(p, "完成 ✅" if o else "失败 ❌"))
                     pct = int((i + 1) / total * 100)
                     self.root.after(0, lambda v=pct: self.progress.configure(value=v))
@@ -517,7 +522,7 @@ class SettingsDialog(tk.Toplevel):
     def __init__(self, parent, config, callback):
         super().__init__(parent)
         self.title("设置")
-        self.geometry("500x380")
+        self.geometry("520x460")
         self.resizable(False, False)
         self.config = dict(config)
         self.callback = callback
@@ -530,22 +535,40 @@ class SettingsDialog(tk.Toplevel):
         frame = ttk.Frame(self, padding=15)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(frame, text="优先解压方式:").grid(row=0, column=0, sticky=tk.W, pady=5)
-        self.method_var = tk.StringVar(value=self.config.get("method", "auto"))
-        methods = [("自动", "auto")]
-        if HAS_PYZIPPER: methods.append(("pyzipper (内置)", "pyzipper"))
-        methods += [("7-Zip", "7z"), ("WinRAR", "rar")]
-        for i, (text, val) in enumerate(methods):
-            ttk.Radiobutton(frame, text=text, variable=self.method_var, value=val).grid(
-                row=i, column=1, sticky=tk.W, padx=10)
+        # 解压方式排序
+        ttk.Label(frame, text="解压方式排序（从上到下优先）:").grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=5)
+        sort_frame = ttk.Frame(frame)
+        sort_frame.grid(row=1, column=0, columnspan=2, sticky=tk.EW, pady=5)
 
-        row = len(methods)
-        ttk.Label(frame, text="外部工具路径:").grid(row=row, column=0, sticky=tk.W, pady=10)
-        self.tool_var = tk.StringVar(value=self.config.get("external_tool", ""))
-        tf = ttk.Frame(frame); tf.grid(row=row, column=1, sticky=tk.EW, padx=10)
-        ttk.Entry(tf, textvariable=self.tool_var, width=35).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(tf, text="浏览", command=self._browse_tool).pack(side=tk.LEFT, padx=2)
+        self.order_listbox = tk.Listbox(sort_frame, height=4, exportselection=False)
+        self.order_listbox.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        order = self.config.get("method_order", ["pyzipper", "7z", "rar"])
+        names = {"pyzipper": "pyzipper (内置)", "7z": "7-Zip", "rar": "WinRAR"}
+        for m in order:
+            self.order_listbox.insert(tk.END, names.get(m, m))
 
+        btn_col = ttk.Frame(sort_frame)
+        btn_col.pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_col, text="▲", width=3, command=self._move_up).pack()
+        ttk.Button(btn_col, text="▼", width=3, command=self._move_down).pack()
+
+        # 7-Zip 路径
+        row = 2
+        ttk.Label(frame, text="7-Zip 路径:").grid(row=row, column=0, sticky=tk.W, pady=5)
+        self.z7_var = tk.StringVar(value=self.config.get("7z_path", ""))
+        tf7 = ttk.Frame(frame); tf7.grid(row=row, column=1, sticky=tk.EW, padx=10)
+        ttk.Entry(tf7, textvariable=self.z7_var, width=35).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(tf7, text="浏览", command=self._browse_z7).pack(side=tk.LEFT, padx=2)
+
+        # WinRAR 路径
+        row += 1
+        ttk.Label(frame, text="WinRAR 路径:").grid(row=row, column=0, sticky=tk.W, pady=5)
+        self.rar_var = tk.StringVar(value=self.config.get("rar_path", ""))
+        tfr = ttk.Frame(frame); tfr.grid(row=row, column=1, sticky=tk.EW, padx=10)
+        ttk.Entry(tfr, textvariable=self.rar_var, width=35).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(tfr, text="浏览", command=self._browse_rar).pack(side=tk.LEFT, padx=2)
+
+        # 扫描结果
         row += 1
         if self.tools:
             ttk.Label(frame, text="扫描到:").grid(row=row, column=0, sticky=tk.W, pady=5)
@@ -553,10 +576,14 @@ class SettingsDialog(tk.Toplevel):
             for path, name in self.tools:
                 f = ttk.Frame(lf); f.pack(fill=tk.X)
                 ttk.Label(f, text=f"{name}: {path}", font=("", 7)).pack(side=tk.LEFT)
-                ttk.Button(f, text="选用", width=4, command=lambda p=path: self.tool_var.set(p)).pack(side=tk.RIGHT)
+                if "7-Zip" in name or "7z" in name.lower():
+                    ttk.Button(f, text="选用", width=4, command=lambda p=path: self.z7_var.set(p)).pack(side=tk.RIGHT)
+                else:
+                    ttk.Button(f, text="选用", width=4, command=lambda p=path: self.rar_var.set(p)).pack(side=tk.RIGHT)
         else:
             ttk.Label(frame, text="未扫描到", foreground="gray").grid(row=row, column=1, sticky=tk.W, padx=10, pady=5)
 
+        # 输出目录
         row += 1
         ttk.Label(frame, text="输出目录:").grid(row=row, column=0, sticky=tk.W, pady=10)
         self.out_var = tk.StringVar(value=self.config.get("output_dir", str(BASE_OUTPUT)))
@@ -564,22 +591,51 @@ class SettingsDialog(tk.Toplevel):
         ttk.Entry(of, textvariable=self.out_var, width=35).pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(of, text="浏览", command=self._browse_out).pack(side=tk.LEFT, padx=2)
 
+        # 保存/取消
         row += 1
         btn = ttk.Frame(frame); btn.grid(row=row, column=0, columnspan=2, pady=20)
         ttk.Button(btn, text="保存", command=self._save).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn, text="取消", command=self.destroy).pack(side=tk.LEFT, padx=5)
 
-    def _browse_tool(self):
-        p = filedialog.askopenfilename(title="选择解压工具", filetypes=[("可执行文件", "*.exe")])
-        if p: self.tool_var.set(p)
+    def _move_up(self):
+        sel = self.order_listbox.curselection()
+        if not sel or sel[0] == 0: return
+        i = sel[0]
+        text = self.order_listbox.get(i)
+        self.order_listbox.delete(i)
+        self.order_listbox.insert(i - 1, text)
+        self.order_listbox.selection_set(i - 1)
+
+    def _move_down(self):
+        sel = self.order_listbox.curselection()
+        if not sel or sel[0] >= self.order_listbox.size() - 1: return
+        i = sel[0]
+        text = self.order_listbox.get(i)
+        self.order_listbox.delete(i)
+        self.order_listbox.insert(i + 1, text)
+        self.order_listbox.selection_set(i + 1)
+
+    def _browse_z7(self):
+        p = filedialog.askopenfilename(title="选择 7z.exe", filetypes=[("7z.exe", "7z.exe"), ("可执行文件", "*.exe")])
+        if p: self.z7_var.set(p)
+
+    def _browse_rar(self):
+        p = filedialog.askopenfilename(title="选择 WinRAR.exe", filetypes=[("WinRAR.exe", "WinRAR.exe"), ("可执行文件", "*.exe")])
+        if p: self.rar_var.set(p)
 
     def _browse_out(self):
         p = filedialog.askdirectory(title="选择输出目录")
         if p: self.out_var.set(p)
 
     def _save(self):
-        self.config["method"] = self.method_var.get()
-        self.config["external_tool"] = self.tool_var.get()
+        names_rev = {"pyzipper (内置)": "pyzipper", "7-Zip": "7z", "WinRAR": "rar"}
+        order = []
+        for i in range(self.order_listbox.size()):
+            text = self.order_listbox.get(i)
+            order.append(names_rev.get(text, text))
+        self.config["method_order"] = order
+        self.config["7z_path"] = self.z7_var.get()
+        self.config["rar_path"] = self.rar_var.get()
         self.config["output_dir"] = self.out_var.get()
         self.callback(self.config)
         self.destroy()
