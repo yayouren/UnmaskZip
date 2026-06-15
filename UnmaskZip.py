@@ -175,25 +175,12 @@ def _flatten_single(out_dir, base_out, log_cb):
 
     if dest.exists():
         if item.is_dir():
-            # 文件夹存在 → 合并内容
             try:
-                for child in item.iterdir():
-                    cd = dest / child.name
-                    if cd.exists():
-                        stem, suffix = child.stem, child.suffix
-                        n = 1
-                        while cd.exists():
-                            cd = dest / f"{stem}_{n}{suffix}"
-                            n += 1
-                    shutil.move(str(child), str(cd))
-                item.rmdir()
-                out_dir.rmdir()
-                log_cb(f"    → 合并到: {dest.name}")
+                shutil.rmtree(dest)
             except Exception as e:
-                log_cb(f"    [!] 合并失败: {e}")
-            return
+                log_cb(f"    [!] 清理旧目录失败: {e}")
+                return
         else:
-            # 文件重名 → 加后缀
             stem, suffix = dest.stem, dest.suffix
             n = 1
             while dest.exists():
@@ -206,15 +193,21 @@ def _flatten_single(out_dir, base_out, log_cb):
     except Exception as e:
         log_cb(f"    [!] 整理失败: {e}")
 
-def process_one_file(fp, passwords, method, tool_path, base_out, log_cb):
+def process_one_file(fp, passwords, method, tool_path, base_out, log_cb, overwrite=False):
     """处理单个文件，返回是否成功"""
     fp = Path(fp)
     log_cb(f"[*] {fp.name}")
 
     out_dir = base_out / fp.stem
-    if out_dir.exists() and any(out_dir.iterdir()):
+    if not overwrite and out_dir.exists() and any(out_dir.iterdir()):
         log_cb(f"  [-] 已解压，跳过")
         return True
+
+    if overwrite and out_dir.exists():
+        try:
+            shutil.rmtree(out_dir)
+        except Exception as e:
+            log_cb(f"  [!] 清理旧目录失败: {e}")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     ok = False
@@ -299,6 +292,9 @@ class App:
 
         self.same_dir_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(top, text="解压到同目录", variable=self.same_dir_var).pack(side=tk.LEFT, padx=10)
+
+        self.overwrite_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(top, text="覆盖解压", variable=self.overwrite_var).pack(side=tk.LEFT, padx=2)
 
         self.log_visible = tk.BooleanVar(value=True)
         ttk.Checkbutton(top, text="显示日志", variable=self.log_visible,
@@ -421,6 +417,7 @@ class App:
         for p in self.files: self._set_status(p, "等待")
 
         same_dir = self.same_dir_var.get()
+        overwrite = self.overwrite_var.get()
         total = len(self.files)
 
         def log_cb(msg):
@@ -438,7 +435,7 @@ class App:
                     self.root.after(0, lambda p=fp: self._set_status(p, "解压中"))
                     base = Path(fp).parent if same_dir else Path(self.config.get("output_dir", str(BASE_OUTPUT)))
                     base.mkdir(parents=True, exist_ok=True)
-                    ok = process_one_file(fp, self.passwords, method, tool, base, log_cb)
+                    ok = process_one_file(fp, self.passwords, method, tool, base, log_cb, overwrite)
                     self.root.after(0, lambda p=fp, o=ok: self._set_status(p, "完成 ✅" if o else "失败 ❌"))
                     pct = int((i + 1) / total * 100)
                     self.root.after(0, lambda v=pct: self.progress.configure(value=v))
