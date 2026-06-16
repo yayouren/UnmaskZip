@@ -425,8 +425,28 @@ class App:
             self._append_file(p)
 
     def _on_drop(self, event):
-        paths = re.findall(r'\{(.+?)\}', event.data)
-        if not paths: paths = event.data.split()
+        raw = event.data
+        # 解析拖拽路径: {path1} {path2} ...
+        paths = []
+        depth = 0
+        buf = []
+        for ch in raw:
+            if ch == '{':
+                depth += 1
+                if depth == 1:
+                    buf = []
+                    continue
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    paths.append(''.join(buf))
+                    continue
+            if depth > 0:
+                buf.append(ch)
+        if not paths:
+            paths = raw.split()
+        self.log_msg(f"[D] 拖入原始数据: {raw[:200]}...")
+
         added = 0
         for p in paths:
             p = p.strip()
