@@ -233,16 +233,18 @@ def _flatten_single(out_dir, base_out, log_cb):
     except Exception as e:
         log_cb(f"    [!] 整理失败: {e}")
 
+_processed = set()  # 本次运行已处理的文件路径
+
 def process_one_file(fp, passwords, config, base_out, log_cb, overwrite=False, cleanup=False):
     """处理单个文件，config = {method_order, 7z_path, rar_path}"""
     fp = Path(fp)
     log_cb(f"[*] {fp.name}")
 
-    out_dir = base_out / fp.stem
-    if not overwrite and out_dir.exists() and any(out_dir.iterdir()):
-        log_cb(f"  [-] 已解压，跳过")
+    if not overwrite and str(fp.resolve()) in _processed:
+        log_cb(f"  [-] 已解压过，跳过")
         return True
 
+    out_dir = base_out / fp.stem
     if overwrite and out_dir.exists():
         try: shutil.rmtree(out_dir)
         except Exception as e: log_cb(f"  [!] 清理旧目录失败: {e}")
@@ -284,6 +286,7 @@ def process_one_file(fp, passwords, config, base_out, log_cb, overwrite=False, c
                 if not any(out_dir.iterdir()):
                     shutil.rmtree(out_dir, ignore_errors=True)
             except: pass
+    _processed.add(str(fp.resolve()))
     return True
 
 def _recurse_dir(folder, passwords, config, base_out, log_cb, cleanup=False):
