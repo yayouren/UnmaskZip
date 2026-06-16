@@ -667,6 +667,13 @@ class PasswordDialog(tk.Toplevel):
         self.transient(parent)
         self.grab_set()
 
+    def _center(self, parent):
+        self.update_idletasks()
+        pw, ph = parent.winfo_width(), parent.winfo_height()
+        px, py = parent.winfo_rootx(), parent.winfo_rooty()
+        w, h = self.winfo_width(), self.winfo_height()
+        self.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
+
     def _build(self):
         frame = ttk.Frame(self, padding=10)
         frame.pack(fill=tk.BOTH, expand=True)
