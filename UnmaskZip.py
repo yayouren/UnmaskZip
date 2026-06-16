@@ -327,7 +327,9 @@ def _recurse_dir(folder, passwords, config, base_out, log_cb, cleanup=False):
             _flatten_single(out_dir, base_out, log_cb)
         # 清理中间文件
         if cleanup:
-            try: f.unlink()
+            try:
+                f.unlink()
+                log_cb(f"  [清理] 已删除中间文件: {f.name}")
             except: pass
 
 # ===================== GUI =====================
