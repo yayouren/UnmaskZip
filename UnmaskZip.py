@@ -290,15 +290,22 @@ def process_one_file(fp, passwords, config, base_out, log_cb, overwrite=False, c
     return True
 
 def _recurse_dir(folder, passwords, config, base_out, log_cb, cleanup=False):
+    """递归扫描文件夹内所有层级的可处理文件，深层优先"""
     targets = []
     try:
-        for f in folder.iterdir():
+        for f in folder.rglob("*"):
             if f.is_file() and f.suffix.lower() in TARGET_EXTS:
                 targets.append(f)
     except: return
+    if not targets: return
+
+    # 按深度降序：深层先处理
+    targets.sort(key=lambda x: len(x.relative_to(folder).parts), reverse=True)
+
     order = config.get("method_order", ["pyzipper", "7z", "rar"])
     paths = {"7z": config.get("7z_path", ""), "rar": config.get("rar_path", "")}
-    for f in sorted(targets):
+    for f in targets:
+        log_cb(f"  [中间] 处理内层: {f.name}")
         out_dir = base_out / f.stem
         if out_dir.exists() and any(out_dir.iterdir()): continue
         out_dir.mkdir(parents=True, exist_ok=True)
