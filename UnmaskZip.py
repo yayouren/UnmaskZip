@@ -182,6 +182,13 @@ def _flatten_single(out_dir, base_out, log_cb):
         log_cb(f"    [D] 条目数!=1, 保留子目录")
         return
     item = items[0]
+    # 空文件夹直接删
+    if item.is_dir() and not any(item.iterdir()):
+        try:
+            item.rmdir()
+            out_dir.rmdir()
+        except: pass
+        return
     dest = base_out / item.name
     log_cb(f"    [D] 准备平铺: {item.name} -> {dest}")
 
