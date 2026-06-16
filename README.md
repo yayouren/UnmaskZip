@@ -50,6 +50,10 @@ pyinstaller --onefile --windowed --name "UnmaskZip" ^
 - cryptography
 - tkinterdnd2
 
+## ⚠️ 已知问题
+
+**批量拖拽时部分文件名含特殊符号（如 `｜` 全角竖线）可能无法识别。** 这是 tkinterdnd2 的底层限制，暂无修复方案。遇到此类文件请单独拖入，或先用「添加文件」按钮手动选择，亦可临时改名后拖入再改回。
+
 ## 📄 License
 
 MIT
