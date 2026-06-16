@@ -24,3 +24,7 @@ _extracted/
 # 系统
 .DS_Store
 Thumbs.db
+
+# 打包产物
+*.exe
+*.spec
