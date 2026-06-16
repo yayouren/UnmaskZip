@@ -199,12 +199,22 @@ def _flatten_single(out_dir, base_out, log_cb):
             return
 
         if item.is_dir():
+            # 合并：逐文件覆盖，保留 dest 原有内容
             try:
-                shutil.rmtree(dest)
-                log_cb(f"    [D] 已删除旧目录: {dest.name}")
+                for child in item.iterdir():
+                    cd = dest / child.name
+                    if cd.exists():
+                        if child.is_dir():
+                            shutil.rmtree(cd)
+                        else:
+                            cd.unlink()
+                    shutil.move(str(child), str(cd))
+                item.rmdir()
+                out_dir.rmdir()
+                log_cb(f"    → 合并到: {dest.name}")
             except Exception as e:
-                log_cb(f"    [!] 清理旧目录失败: {e}")
-                return
+                log_cb(f"    [!] 合并失败: {e}")
+            return
         else:
             stem, suffix = dest.stem, dest.suffix
             n = 1
