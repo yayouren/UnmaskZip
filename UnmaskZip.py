@@ -663,6 +663,7 @@ class PasswordDialog(tk.Toplevel):
         self.passwords = list(passwords)
         self.callback = callback
         self._build()
+        self._center(parent)
         self.transient(parent)
         self.grab_set()
 
