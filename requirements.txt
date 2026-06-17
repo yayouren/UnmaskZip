@@ -1,3 +1,4 @@
 pyzipper>=0.3.0
+py7zr>=0.20.0
 cryptography>=41.0.0
 tkinterdnd2>=0.3.0

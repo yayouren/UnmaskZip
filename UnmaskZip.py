@@ -20,10 +20,10 @@ from tkinterdnd2 import TkinterDnD
 
 # ---------- 解压库 ----------
 try:
-    import pyzipper
-    HAS_PYZIPPER = True
+    import py7zr
+    HAS_PY7ZR = True
 except ImportError:
-    HAS_PYZIPPER = False
+    HAS_PY7ZR = False
 
 if getattr(sys, "frozen", False):
     SCRIPT_DIR = Path(sys.executable).parent
@@ -35,7 +35,7 @@ PASSWORDS_FILE = SCRIPT_DIR / "passwords.dat"
 KEY_FILE = SCRIPT_DIR / ".key"
 BASE_OUTPUT = SCRIPT_DIR / "_extracted"
 
-TARGET_EXTS = {".zip", ".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".webm",
+TARGET_EXTS = {".zip", ".7z", ".rar", ".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".webm",
                ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"}
 
 _7Z_PATHS = [r"C:\Program Files\7-Zip\7z.exe", r"C:\Program Files (x86)\7-Zip\7z.exe"]
@@ -61,7 +61,7 @@ def decrypt_data(enc: str) -> str:
     return base64.b64decode(enc.encode()).decode()
 
 # ===================== 配置 =====================
-DEFAULT_CONFIG = {"method_order": ["pyzipper", "7z", "rar"], "7z_path": "", "rar_path": "", "output_dir": str(BASE_OUTPUT)}
+DEFAULT_CONFIG = {"method_order": ["pyzipper", "py7zr", "7z", "rar"], "7z_path": "", "rar_path": "", "output_dir": str(BASE_OUTPUT)}
 
 def load_config():
     if CONFIG_FILE.exists():
@@ -130,21 +130,54 @@ def _extract_pyzipper(filepath, out_dir, passwords, log_cb):
         except: continue
     return False
 
-def _extract_pyzipper_pk(filepath, out_dir, passwords, log_cb):
-    if not HAS_PYZIPPER: return False
+def _extract_py7zr(filepath, out_dir, passwords, log_cb):
+    if not HAS_PY7ZR: return False
+    try:
+        with py7zr.SevenZipFile(filepath, mode="r") as sz:
+            sz.extractall(out_dir)
+        log_cb(f"  [√] 无密码 (py7zr)")
+        return True
+    except: pass
+    for pwd in passwords:
+        try:
+            with py7zr.SevenZipFile(filepath, mode="r", password=pwd) as sz:
+                sz.extractall(out_dir)
+            log_cb(f"  [√] 密码解压 (py7zr): {pwd}")
+            return True
+        except: continue
+    return False
+
+def _extract_from_raw(filepath, out_dir, passwords, log_cb):
+    """搜索 ZIP / 7z 签名，切出压缩数据后解压"""
     try: raw = filepath.read_bytes()
     except: return False
+
+    # ZIP 签名
     pos = raw.rfind(b'PK\x05\x06')
     if pos == -1: pos = raw.find(b'PK\x03\x04')
-    if pos == -1: return False
-    tmp = Path(tempfile.gettempdir()) / f"_ext_{filepath.stem}.zip"
-    try:
-        tmp.write_bytes(raw[pos:])
-        ok = _extract_pyzipper(tmp, out_dir, passwords, log_cb)
-        try: tmp.unlink()
+    if pos >= 0:
+        tmp = Path(tempfile.gettempdir()) / f"_ext_{filepath.stem}.zip"
+        try:
+            tmp.write_bytes(raw[pos:])
+            ok = _extract_pyzipper(tmp, out_dir, passwords, log_cb) if HAS_PYZIPPER else False
+            try: tmp.unlink()
+            except: pass
+            if ok: return True
         except: pass
-        return ok
-    except: return False
+
+    # 7z 签名
+    pos = raw.find(b"7z\xbc\xaf'\x1c")
+    if pos >= 0:
+        tmp = Path(tempfile.gettempdir()) / f"_ext_{filepath.stem}.7z"
+        try:
+            tmp.write_bytes(raw[pos:])
+            ok = _extract_py7zr(tmp, out_dir, passwords, log_cb)
+            try: tmp.unlink()
+            except: pass
+            if ok: return True
+        except: pass
+
+    return False
 
 def _extract_external(filepath, out_dir, passwords, tool_path, log_cb):
     if not tool_path or not Path(tool_path).exists(): return False
@@ -264,6 +297,8 @@ def process_one_file(fp, passwords, config, base_out, log_cb, overwrite=False, c
     for m in order:
         if m == "pyzipper" and HAS_PYZIPPER:
             ok = _extract_pyzipper(fp, out_dir, passwords, log_cb)
+        elif m == "py7zr" and HAS_PY7ZR:
+            ok = _extract_py7zr(fp, out_dir, passwords, log_cb)
         elif m in ("7z", "rar"):
             ok = _extract_external(fp, out_dir, passwords, paths.get(m, ""), log_cb)
         log_cb(f"  [D] {m}: {'OK' if ok else 'FAIL'}")
@@ -271,7 +306,7 @@ def process_one_file(fp, passwords, config, base_out, log_cb, overwrite=False, c
 
     if not ok:
         # 最后尝试 PK 签名搜索
-        ok = _extract_pyzipper_pk(fp, out_dir, passwords, log_cb)
+        ok = _extract_from_raw(fp, out_dir, passwords, log_cb)
         log_cb(f"  [D] pyzipper+PK: {'OK' if ok else 'FAIL'}")
 
     if not ok:
@@ -320,11 +355,13 @@ def _recurse_dir(folder, passwords, config, base_out, log_cb, cleanup=False):
         for m in order:
             if m == "pyzipper" and HAS_PYZIPPER:
                 ok = _extract_pyzipper(f, out_dir, passwords, log_cb)
+            elif m == "py7zr" and HAS_PY7ZR:
+                ok = _extract_py7zr(f, out_dir, passwords, log_cb)
             elif m in ("7z", "rar"):
                 ok = _extract_external(f, out_dir, passwords, paths.get(m, ""), log_cb)
             if ok: break
         if not ok:
-            ok = _extract_pyzipper_pk(f, out_dir, passwords, log_cb)
+            ok = _extract_from_raw(f, out_dir, passwords, log_cb)
         if not ok:
             try:
                 if not any(out_dir.iterdir()): out_dir.rmdir()
@@ -605,7 +642,7 @@ class SettingsDialog(tk.Toplevel):
         self.order_listbox = tk.Listbox(sort_frame, height=4, exportselection=False)
         self.order_listbox.pack(side=tk.LEFT, fill=tk.X, expand=True)
         order = self.config.get("method_order", ["pyzipper", "7z", "rar"])
-        names = {"pyzipper": "pyzipper (内置)", "7z": "7-Zip", "rar": "WinRAR"}
+        names = {"pyzipper": "pyzipper (内置)", "py7zr": "py7zr (内置)", "7z": "7-Zip", "rar": "WinRAR"}
         for m in order:
             self.order_listbox.insert(tk.END, names.get(m, m))
 
@@ -690,7 +727,7 @@ class SettingsDialog(tk.Toplevel):
         if p: self.out_var.set(p)
 
     def _save(self):
-        names_rev = {"pyzipper (内置)": "pyzipper", "7-Zip": "7z", "WinRAR": "rar"}
+        names_rev = {"pyzipper (内置)": "pyzipper", "py7zr (内置)": "py7zr", "7-Zip": "7z", "WinRAR": "rar"}
         order = []
         for i in range(self.order_listbox.size()):
             text = self.order_listbox.get(i)
