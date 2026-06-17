@@ -20,6 +20,12 @@ from tkinterdnd2 import TkinterDnD
 
 # ---------- 解压库 ----------
 try:
+    import pyzipper
+    HAS_PYZIPPER = True
+except ImportError:
+    HAS_PYZIPPER = False
+
+try:
     import py7zr
     HAS_PY7ZR = True
 except ImportError:
